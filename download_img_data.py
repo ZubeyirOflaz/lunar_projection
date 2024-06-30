@@ -1,7 +1,7 @@
 # Description: This file contains the function that downloads the Lunar Reconnaissance Orbiter (LRO) GDR images from the NASA website.
 import os
 import requests
-from utils import file_dict, retry_download
+from utils import file_dict
 import json
 
 def download():
@@ -22,13 +22,13 @@ def download():
     """
 
     prompt = """
-    Please specify the resolution of the GDR Cylindrical projection images you would like to download by choosing a the number for the .
+    Please specify the resolution of the GDR Cylindrical projection images you would like to download by choosing a number below:
     4: 4 pixels/degree (2 MB)
-    16: 16 pixels/degree (32 MB)
-    64: 64 pixels/degree (507 MB)
-    128: 128 pixels/degree (2025 MB)
-    256: 256 pixels/degree (8100 MB)
-    512: 512 pixels/degree (32400 MB)
+    16: 16 pixels/degree (18 MB)
+    64: 64 pixels/degree (186 MB)
+    128: 128 pixels/degree (221 MB)
+    256: 256 pixels/degree (~1300 MB)
+    512: 512 pixels/degree (~2800 MB)
 
     NOTE: Resolutions higher than 128 pixels/degree may take a long time to download, requires serious amount of compute to work with, and not needed for most applications."""
     
