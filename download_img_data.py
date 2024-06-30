@@ -18,7 +18,8 @@ def download():
     This function is used to download the Lunar Reconnaissance Orbiter (LRO) GDR images from the NASA website.
     
     Function asks the user to specify the resolution of the GDR Cylindrical projection images. It checks if the image file has already been downloaded. If not, 
-    it downloads the image file and the accompanying lbl file. For elevation data that has multiple files, the function will download all the files.
+    it downloads the image file and the accompanying lbl file. For elevation data that has multiple files, the function will download all the files. Please note that the 
+    functions that create stl files and use rasterio can only be used with the 128 pixels/degree resolution data and less.
     """
 
     prompt = """
