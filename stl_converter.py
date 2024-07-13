@@ -79,3 +79,25 @@ def convert_array_to_stl(matrix: np.ndarray, x_spacing: float, y_spacing: float,
     # Write the mesh to file    
     your_mesh.save(stl_filename)  
 
+
+def simplify_mesh_qem(input_file, face_number):  
+    ms = ml.MeshSet()  
+    ms.load_new_mesh(input_file)  
+      
+    # Simplify the mesh using Quadric Edge Collapse Decimation  
+    # face_number is the desired number of faces in the output mesh  
+    print(f"Mesh will be simplified to {face_number} faces using Quadric Edge Collapse Decimation.")
+    ms.apply_filter('simplification_quadric_edge_collapse_decimation', targetfacenum=face_number)
+      
+    
+    # Save the output  
+    ms.save_current_mesh(input_file)
+    # Delete the input_mesh file
+  
+if __name__ == "__main__":
+    normalization_list = [40]
+    spacing_list = [0.5]
+    for norm in normalization_list:
+        for spacing in spacing_list:
+          data = prep_jp2_for_stl_conversion('reprojected_output.jp2', normalization_range=norm)
+          convert_array_to_stl(data, x_spacing=spacing, y_spacing=spacing, stl_filename=f'lunar_surface_{norm}_{spacing}_2.stl')
