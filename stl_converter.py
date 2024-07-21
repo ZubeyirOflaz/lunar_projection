@@ -2,7 +2,6 @@ import numpy as np
 from PIL import Image
 import PIL  
 from stl import mesh 
-import pymeshlab as ml
 import os
 import rasterio
 import scipy.ndimage
@@ -80,19 +79,8 @@ def convert_array_to_stl(matrix: np.ndarray, x_spacing: float, y_spacing: float,
     your_mesh.save(stl_filename)  
 
 
-def simplify_mesh_qem(input_file, face_number):  
-    ms = ml.MeshSet()  
-    ms.load_new_mesh(input_file)  
-      
-    # Simplify the mesh using Quadric Edge Collapse Decimation  
-    # face_number is the desired number of faces in the output mesh  
-    print(f"Mesh will be simplified to {face_number} faces using Quadric Edge Collapse Decimation.")
-    ms.apply_filter('simplification_quadric_edge_collapse_decimation', targetfacenum=face_number)
-      
-    
-    # Save the output  
-    ms.save_current_mesh(input_file)
-    # Delete the input_mesh file
+
+
   
 if __name__ == "__main__":
     normalization_list = [40]
