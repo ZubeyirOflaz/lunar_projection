@@ -2,6 +2,7 @@ import numpy as np
 from PIL import Image
 import PIL  
 from stl import mesh 
+import pymeshlab as ml
 import os
 import rasterio
 import scipy.ndimage
@@ -11,8 +12,16 @@ from scipy.ndimage import gaussian_filter
 from copy import deepcopy
 import numpy as np  
 from scipy.ndimage import generic_filter  
+  
+def check_neighbors(values):  
+    center = values[len(values)//2]  
+    if all(x==0 for x in values if x != center):  
+        return np.nan  
+    else:  
+        return center  
 
-
+# Increase the maximum image size PIL can open
+PIL.Image.MAX_IMAGE_PIXELS = 955360000
 
 
 def transform_image_to_array(img_location: str , numpy_dtype: str = 'float16'):
@@ -39,6 +48,62 @@ def transform_image_to_array(img_location: str , numpy_dtype: str = 'float16'):
     
     return img_np
 
+def prep_jp2_for_stl_conversion(jp2_file: str, normalization_range: float = 10):
+    cfg = Config()
+    with rasterio.open(jp2_file) as src:
+        data = src.read(1)
+        data = np.flip(data, axis=1)
+        
+        data = normalize_zoom_matrix(data, normalize = cfg.apply_default_transformation, zoom_value= cfg.zoom_factor)
+
+        data_2 = deepcopy(data)
+        data = gaussian_filter(data, sigma=0.5)
+
+        # Get range of the array, use it for normalization rate calculation
+        max_val = np.max(data)
+        range = max_val - 10
+        normalization_rate = normalization_range / range
+
+        # Set all the non positive values to 0, preserve lunar edges before gaussian filter
+        data[data_2 <= 0] = 0
+        data[data <= 0] = 0
+
+        
+        data = data * normalization_rate
+        data = generic_filter(data, check_neighbors, size=3, mode='constant', cval=0.0)
+        return data
+
+def visualize_jp2(data, normalization_range = 1):
+    plt.close('all')
+    fig = plt.figure(figsize=(50, 50))  
+        
+        # Create a GeoAxes in the tile's projection  
+    ax = plt.axes()
+        # Add the image to the map  
+    img = ax.imshow(data, origin='upper', cmap='gray')
+    plt.axis('off')  
+
+    plt.savefig(f"output_{normalization_range}.png", bbox_inches='tight', pad_inches = 0, transparent=True) 
+
+        
+def normalize_zoom_matrix(data, normalize = True, zoom_value = 1.0):
+    original_shape = data.shape  
+
+    if normalize:
+        # Desired square size  
+        desired_size = min(original_shape)  
+        
+        if normalize:
+            # Calculate resampling ratio  
+            resample_ratio = (desired_size / np.array(original_shape)  ) * zoom_value
+        else:
+            resample_ratio = zoom_value
+        if not normalize and zoom_value == 1:
+            return data      
+        # Use scipy's ndimage.zoom function to resample  
+        data = scipy.ndimage.zoom(data, resample_ratio)
+
+    return data
 
   
 def convert_array_to_stl(matrix: np.ndarray, x_spacing: float, y_spacing: float, stl_filename: str = 'lunar_surface.stl'):    
@@ -79,8 +144,19 @@ def convert_array_to_stl(matrix: np.ndarray, x_spacing: float, y_spacing: float,
     your_mesh.save(stl_filename)  
 
 
-
-
+def simplify_mesh_qem(input_file, face_number):  
+    ms = ml.MeshSet()  
+    ms.load_new_mesh(input_file)  
+      
+    # Simplify the mesh using Quadric Edge Collapse Decimation  
+    # face_number is the desired number of faces in the output mesh  
+    print(f"Mesh will be simplified to {face_number} faces using Quadric Edge Collapse Decimation.")
+    ms.apply_filter('simplification_quadric_edge_collapse_decimation', targetfacenum=face_number)
+      
+    
+    # Save the output  
+    ms.save_current_mesh(input_file)
+    # Delete the input_mesh file
   
 if __name__ == "__main__":
     normalization_list = [40]
