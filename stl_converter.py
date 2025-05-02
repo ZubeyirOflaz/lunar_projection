@@ -12,6 +12,9 @@ from scipy.ndimage import gaussian_filter
 from copy import deepcopy
 import numpy as np  
 from scipy.ndimage import generic_filter  
+from pyproj import CRS, Transformer
+from rasterio.warp import reproject, Resampling, calculate_default_transform
+from osgeo import gdal
   
 def check_neighbors(values):  
     center = values[len(values)//2]  
@@ -73,34 +76,48 @@ def prep_jp2_for_stl_conversion(jp2_file: str, normalization_range: float = 10):
         data = generic_filter(data, check_neighbors, size=3, mode='constant', cval=0.0)
         return data
 
-def visualize_jp2(data, normalization_range = 1):
-    plt.close('all')
-    fig = plt.figure(figsize=(50, 50))  
-        
-        # Create a GeoAxes in the tile's projection  
-    ax = plt.axes()
-        # Add the image to the map  
-    img = ax.imshow(data, origin='upper', cmap='gray')
-    plt.axis('off')  
+def visualize_jp2(file_name: str, output_name: str = "output_visualized.png"):
+    """
+    Visualize a JP2 file and save as PNG.
+    
+    Args:
+        file_name: Path to JP2 file
+        output_name: Output file name
+    """
+    with rasterio.open(file_name) as src:
+        data = src.read()
+    data = data[0]
+    data = normalize_zoom_matrix(data, zoom_value=2)
+    
+    plt.imsave(output_name, data, cmap='gray')
 
-    plt.savefig(f"output_{normalization_range}.png", bbox_inches='tight', pad_inches = 0, transparent=True) 
 
+def normalize_zoom_matrix(data, normalize=True, zoom_value=1.0):
+    """
+    Normalize and/or zoom a matrix.
+    
+    Args:
+        data: Input numpy array
+        normalize: Whether to normalize the data
+        zoom_value: Scale factor for zooming
         
-def normalize_zoom_matrix(data, normalize = True, zoom_value = 1.0):
-    original_shape = data.shape  
+    Returns:
+        Processed numpy array
+    """
+    original_shape = data.shape
 
     if normalize:
-        # Desired square size  
-        desired_size = min(original_shape)  
+        # Desired square size
+        desired_size = min(original_shape)
         
         if normalize:
-            # Calculate resampling ratio  
-            resample_ratio = (desired_size / np.array(original_shape)  ) * zoom_value
+            # Calculate resampling ratio
+            resample_ratio = (desired_size / np.array(original_shape)) * zoom_value
         else:
             resample_ratio = zoom_value
         if not normalize and zoom_value == 1:
-            return data      
-        # Use scipy's ndimage.zoom function to resample  
+            return data
+        # Use scipy's ndimage.zoom function to resample
         data = scipy.ndimage.zoom(data, resample_ratio)
 
     return data
@@ -158,6 +175,187 @@ def simplify_mesh_qem(input_file, face_number):
     ms.save_current_mesh(input_file)
     # Delete the input_mesh file
   
+def reproject_jp2(file_name: str, output_name: str = 'output_reprojected.jp2'):
+    """
+    Reproject a JP2 file using configuration settings.
+    
+    Args:
+        file_name: Path to JP2 file
+        output_name: Output file name
+    """
+    cfg = Config()
+
+    if cfg.apply_default_transformation:
+        # Define the new coordinate system you want to reproject to
+        dst_crs = CRS.from_proj4('+proj=ortho +R=1737400 +lon_0=0.4 +lat_0=15.0 +h=35785831 +x_0=0 +y_0=0 +units=m +sweep=y +no_defs +type=crs')
+    else:
+        dst_crs = cfg.custom_transformation_proj4
+    
+    # Open the JP2 file
+    with rasterio.open(file_name) as src:
+        src_array = src.read(1)
+        src_meta = src.meta
+    
+    # Define the destination array (filled with zeros)
+    dst_array = np.zeros_like(src_array)
+    
+    # Reproject the source array to the destination array
+    reproject(
+        source=src_array + abs(np.min(src_array) + 10),
+        destination=dst_array,
+        src_transform=src.transform,
+        src_crs=src_meta['crs'],
+        dst_crs=dst_crs,
+        resampling=Resampling.bilinear)
+    
+    # Update the metadata for the new file
+    src_meta.update({
+        'crs': dst_crs
+    })
+    
+    # Write the reprojected data to a new file
+    with rasterio.open(output_name, 'w', **src_meta) as dst:
+        dst.write(dst_array, 1)
+
+
+def divide_matrix(matrix, num_of_divisions: int = 5, width_of_division: int = 100):
+    """
+    Given a 2d square matrix, divide it into num_of_divisions x num_of_divisions of 
+    squares equal in size submatrices by adding zeros between each division 
+    with the width of width_of_division.
+    
+    Args:
+        matrix: 2d numpy array
+        num_of_divisions: number of divisions in each axis
+        width_of_division: width of the division
+        
+    Returns:
+        divided_matrix: 2d numpy array with divisions
+    """
+    # Get the shape of the matrix
+    shape = matrix.shape
+    # Get the number of rows and columns
+    rows, _ = shape
+    # Get the division locations
+    div_index = rows // num_of_divisions
+    # Add zeros between each division
+    for i in range(1, num_of_divisions):
+        matrix = np.insert(matrix, div_index*i + (width_of_division * (i-1)), 
+                          np.zeros((width_of_division, matrix.shape[1])), axis=0)
+    for i in range(1, num_of_divisions):
+        matrix = np.insert(matrix, div_index*i + (width_of_division * (i-1)), 
+                          np.zeros((width_of_division, matrix.shape[0])), axis=1)
+
+    return matrix
+
+
+def reproject_jp2_with_default_transform(file_name: str, output_name: str = 'output.jp2'):
+    """
+    Reproject a JP2 file using default transform calculation.
+    
+    Args:
+        file_name: Path to JP2 file
+        output_name: Output file name
+    """
+    # Define the existing coordinate system
+    src_crs = CRS.from_proj4('+proj=longlat +a=1737400 +b=1737400 +no_defs')
+    
+    # Define the new coordinate system you want to reproject to
+    dst_crs = CRS.from_proj4('+proj=ortho +lat_0=0 +lon_0=0 +x_0=0 +y_0=0 +a=1737400 +b=1737400 +units=m +no_defs')
+    
+    # Open the JP2 file
+    with rasterio.open(file_name) as src:
+        transform, width, height = calculate_default_transform(
+            src_crs, dst_crs, src.width, src.height, *src.bounds)
+        
+        kwargs = src.meta.copy()
+        kwargs.update({
+            'crs': dst_crs,
+            'transform': transform,
+            'width': width,
+            'height': height
+        })
+        
+        # Reproject and write the reprojected data to a new file
+        with rasterio.open(output_name, 'w', **kwargs) as dst:
+            for i in range(1, src.count + 1):
+                reproject(
+                    source=rasterio.band(src, i),
+                    destination=rasterio.band(dst, i),
+                    src_transform=src.transform,
+                    src_crs=src_crs,
+                    dst_transform=transform,
+                    dst_crs=dst_crs,
+                    resampling=Resampling.nearest)
+
+
+def reproject_jp2_with_transformer(file_name: str, output_name: str = 'output.jp2'):
+    """
+    Reproject a JP2 file using a transformer object.
+    
+    Args:
+        file_name: Path to JP2 file
+        output_name: Output file name
+    """
+    # Define the existing coordinate system
+    src_crs = CRS.from_proj4('+proj=longlat +a=1737400 +b=1737400 +no_defs')
+    
+    # Define the new coordinate system you want to reproject to
+    dst_crs = CRS.from_proj4('+proj=merc +a=1737400 +b=1737400 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +no_defs')
+    
+    # Create a transformer object for reprojection
+    transformer = Transformer.from_crs(src_crs, dst_crs, always_xy=True)
+    
+    # Open the JP2 file
+    with rasterio.open(file_name) as src:
+        # Get the source array and its metadata
+        src_array = src.read(1)
+        src_meta = src.meta
+        
+        # Define the destination array (filled with zeros)
+        dst_array = np.zeros_like(src_array)
+        
+        # Reproject the source array to the destination array
+        reproject(
+            source=src_array + abs(np.min(src_array) + 100),
+            destination=dst_array,
+            src_transform=src.transform,
+            src_crs=src.crs,
+            dst_transform=src.transform,  # Here we use the same transform for source and destination
+            dst_crs=dst_crs,
+            resampling=Resampling.nearest)
+        
+        # Update the metadata for the new file
+        src_meta.update({
+            'crs': dst_crs,
+            'transform': src.transform  # Here we use the same transform for source and destination
+        })
+        
+        # Write the reprojected data to a new file
+        with rasterio.open(output_name, 'w', **src_meta) as dst:
+            dst.write(dst_array, 1)
+
+
+def reproject_jp2_with_gdal(file_name: str, output_name: str = 'output.jp2'):
+    """
+    Reproject a JP2 file using GDAL.
+    
+    Args:
+        file_name: Path to JP2 file
+        output_name: Output file name
+    """
+    input_raster = gdal.Open(file_name)
+    
+    # Define target spatial reference with PROJ4 string
+    proj4_string = '+proj=ortho +lat_0=0 +lon_0=0 +x_0=0 +y_0=0 +a=1737400 +b=1737400 +units=m +no_defs'
+    
+    warp = gdal.Warp(output_name,
+                    input_raster,
+                    dstSRS=proj4_string)
+    
+    # Clear the variable to close files
+    warp = None
+
 if __name__ == "__main__":
     normalization_list = [40]
     spacing_list = [0.5]
